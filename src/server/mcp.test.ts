@@ -172,6 +172,70 @@ describe("McpServer", () => {
       message: "Completed step 3 of 3",
     });
   });
+
+  test("skip output schema validation when tool call result has isError true", async () => {
+    const mcpServer = new McpServer({
+      name: "test server",
+      version: "1.0",
+    });
+
+    const client = new Client(
+      {
+        name: "test client",
+        version: "1.0",
+      },
+      {
+        capabilities: {
+          tools: {},
+        },
+      },
+    );
+
+    // Register a tool with outputSchema that returns isError: true and no structuredContent
+    mcpServer.registerTool(
+      "test-error",
+      {
+        description: "Test tool with output schema and isError true",
+        inputSchema: {
+          input: z.string(),
+        },
+        outputSchema: {
+          processedInput: z.string(),
+          resultType: z.string(),
+        },
+      },
+      async ({ input }) => ({
+        isError: true,
+        content: [
+          {
+            type: "text",
+            text: `Failed to process: ${input}`,
+          },
+        ],
+        // No structuredContent
+      })
+    );
+
+    const [clientTransport, serverTransport] =
+      InMemoryTransport.createLinkedPair();
+
+    await Promise.all([
+      client.connect(clientTransport),
+      mcpServer.server.connect(serverTransport),
+    ]);
+
+    // Call the tool and expect it to return the error, not throw schema validation error
+    const result = await client.callTool({
+      name: "test-error",
+      arguments: {
+        input: "fail-me",
+      },
+    });
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBeDefined();
+    expect((result.content as TextContent[])[0].text).toContain("Failed to process: fail-me");
+  });
 });
 
 describe("ResourceTemplate", () => {
